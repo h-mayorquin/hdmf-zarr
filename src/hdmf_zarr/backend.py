@@ -13,7 +13,8 @@ from zarr.hierarchy import Group
 from zarr.core import Array
 from zarr.storage import (DirectoryStore,
                           TempStore,
-                          NestedDirectoryStore)
+                          NestedDirectoryStore,
+                          ConsolidatedMetadataStore)
 import numcodecs
 
 # HDMF-ZARR imports
@@ -574,6 +575,7 @@ class ZarrIO(HDMFIO):
                     builder=sub_builder,
                     link_data=link_data,
                     exhaust_dci=exhaust_dci,
+                    export_source=export_source
                 )
 
         datasets = builder.datasets
@@ -587,11 +589,11 @@ class ZarrIO(HDMFIO):
                     export_source=export_source,
                 )
 
-        # write all links (haven implemented)
         links = builder.links
         if links:
             for link_name, sub_builder in links.items():
-                self.write_link(group, sub_builder)
+                # Note: sub_builder is a LinkBuilder not the builder within.
+                self.write_link(group, sub_builder, export_source)
 
         attributes = builder.attributes
         self.write_attributes(group, attributes)
@@ -601,12 +603,10 @@ class ZarrIO(HDMFIO):
     @docval({'name': 'obj', 'type': (Group, Array), 'doc': 'the Zarr object to add attributes to'},
             {'name': 'attributes',
              'type': dict,
-             'doc': 'a dict containing the attributes on the Group or Dataset, indexed by attribute name'},
-            {'name': 'export_source', 'type': str,
-             'doc': 'The source of the builders when exporting', 'default': None})
+             'doc': 'a dict containing the attributes on the Group or Dataset, indexed by attribute name'})
     def write_attributes(self, **kwargs):
         """Set (i.e., write) the attributes on a given Zarr Group or Array."""
-        obj, attributes, export_source = getargs('obj', 'attributes', 'export_source', kwargs)
+        obj, attributes = getargs('obj', 'attributes', kwargs)
 
         for key, value in attributes.items():
             # Case 1: list, set, tuple type attributes
@@ -632,14 +632,9 @@ class ZarrIO(HDMFIO):
                     except:  # noqa: E722
                         raise TypeError(str(e) + " type=" + str(type(value)) + "  data=" + str(value)) from e
             # Case 2: References
-            elif isinstance(value, (Container, Builder, ReferenceBuilder)):
-                if isinstance(value, (ReferenceBuilder, Container, Builder)):
-                    type_str = 'object'
-                    if isinstance(value, Builder):
-                        refs = self._create_ref(value, export_source)
-                    else:
-                        refs = self._create_ref(value.builder, export_source)
-                tmp = {'zarr_dtype': type_str, 'value': refs}
+            elif isinstance(value, (Builder, ReferenceBuilder)):
+                refs = self._create_ref(value, self.path)
+                tmp = {'zarr_dtype': 'object', 'value': refs}
                 obj.attrs[key] = tmp
             # Case 3: Scalar attributes
             else:
@@ -755,7 +750,7 @@ class ZarrIO(HDMFIO):
             source_file = str(zarr_ref['source'])
         # Resolve the path relative to the current file
         if not self.is_remote():
-            source_file = os.path.abspath(os.path.join(self.source, source_file))
+            source_file = os.path.abspath(source_file)
         else:
             # get rid of extra "/" and "./" in the path root and source_file
             root_path = str(self.path).rstrip("/")
@@ -779,7 +774,7 @@ class ZarrIO(HDMFIO):
         # Return the create path
         return target_name, target_zarr_obj
 
-    def _create_ref(self, ref_object, export_source=None):
+    def _create_ref(self, ref_object, ref_link_source=None):
         """
         Create a ZarrReference object that points to the given container
 
@@ -789,24 +784,22 @@ class ZarrIO(HDMFIO):
         """
         if isinstance(ref_object, Builder):
             if isinstance(ref_object, LinkBuilder):
-                builder = ref_object.target_builder
+                builder = ref_object.builder
             else:
                 builder = ref_object
         elif isinstance(ref_object, ReferenceBuilder):
             builder = ref_object.builder
-        else:
-            builder = self.manager.build(ref_object)
 
-        path = self.__get_path(builder)
+        path = self.__get_path(builder)  # This is the internal path in the store to the item.
 
         # get the object id if available
         object_id = builder.get('object_id', None)
-
         # determine the object_id of the source by following the parents of the builder until we find the root
         # the root builder should be the same as the source file containing the reference
         curr = builder
         while curr is not None and curr.name != ROOT_NAME:
             curr = curr.parent
+
         if curr:
             source_object_id = curr.get('object_id', None)
         # We did not find ROOT_NAME as a parent. This should only happen if we have an invalid
@@ -819,22 +812,36 @@ class ZarrIO(HDMFIO):
 
         # by checking os.isdir makes sure we have a valid link path to a dir for Zarr. For conversion
         # between backends a user should always use export which takes care of creating a clean set of builders.
-        source = (builder.source
-                  if (builder.source is not None and os.path.isdir(builder.source))
-                  else self.source)
+        if ref_link_source is None:
+            # TODO: Refactor appending a dataset of references so this doesn't need to be called.
+            ref_link_source = (builder.source
+                      if (builder.source is not None and os.path.isdir(builder.source))
+                      else self.source)
 
-        # Make the source relative to the current file
-        # TODO: This check assumes that all links are internal links on export.
-        # Need to deal with external links on export.
-        if export_source is not None:
-            # Make sure the source of the reference is now towards the new file
-            # and not the original source when exporting.
-            source = '.'
+        if not isinstance(ref_link_source, str):
+            # self.path is sometimes given as the ref_link_source. It can
+            # be either a (str, Path, *SUPPORTED_ZARR_STORES). That being said,
+            # when self.path is a Path, it is converted to a str in __init__.
+            # We only have to deal with *SUPPORTED_ZARR_STORES and strings.
+            ref_link_source = ref_link_source.path
+
+        # Note: We want want to construct the relative path with
+        # os.path.relpath(<absolute_path_to_the_target>, <absolute_path_to_the_file_that_is_being_exported_to>)
+        # That being said, we want to avoid a reference being defined as '.' because '.' means whatever file you
+        # are in. This does not help if you are trying to access a link/ref in another file and the source says
+        # '.' so look in yourself. That is why the dirname is there.
+
+        # Note: Don't use just os.path.relpath() with just a single arg, i.e., source. This will make the
+        # path relative to the working directory. We want it relative to where it lives in the file system.
+        if not isinstance(self.path, str):
+            str_path = self.path.path
         else:
-            source = os.path.relpath(os.path.abspath(source), start=self.abspath)
+            str_path = self.path
+        rel_source = os.path.relpath(os.path.abspath(ref_link_source), os.path.dirname(os.path.abspath(str_path)))
+
         # Return the ZarrReference object
         ref = ZarrReference(
-            source=source,
+            source=rel_source,
             path=path,
             object_id=object_id,
             source_object_id=source_object_id)
@@ -854,61 +861,51 @@ class ZarrIO(HDMFIO):
         if 'zarr_link' not in parent.attrs:
             parent.attrs['zarr_link'] = []
         zarr_link = list(parent.attrs['zarr_link'])
+        if not isinstance(target_source, str): # a store
+            target_source = target_source.path
         zarr_link.append({'source': target_source, 'path': target_path, 'name': link_name})
         parent.attrs['zarr_link'] = zarr_link
 
     @docval({'name': 'parent', 'type': Group, 'doc': 'the parent Zarr object'},
-            {'name': 'builder', 'type': LinkBuilder, 'doc': 'the LinkBuilder to write'})
+            {'name': 'builder', 'type': LinkBuilder, 'doc': 'the LinkBuilder to write'},
+            {'name': 'export_source', 'type': str,
+             'doc': 'The source of the builders when exporting', 'default': None},)
     def write_link(self, **kwargs):
-        parent, builder = getargs('parent', 'builder', kwargs)
+        parent, builder, export_source = getargs('parent', 'builder', 'export_source', kwargs)
         if self.get_written(builder):
             self.logger.debug("Skipping LinkBuilder '%s' already written to parent group '%s'"
                               % (builder.name, parent.name))
             return
         self.logger.debug("Writing LinkBuilder '%s' to parent group '%s'" % (builder.name, parent.name))
-        name = builder.name
+
         target_builder = builder.builder
+
+        group_filename = self.__get_store_path(parent.store)
+        if export_source is not None:
+            if target_builder.source in (group_filename, export_source):
+                # Case 1:
+                # target_builder.source == export_source
+                # This means we have a SoftLink for a group and so we want the exported link to
+                # also point "inwards" in the file being created.
+                #################################
+                # Case 2:
+                # target_builder.source == group_filename
+                # This is still a SoftLink; however, it is from adding a link to a group after FileA
+                # has been read and we are exporting that to FileB. We still want the link to be "inwards".
+                ref_link_source = group_filename
+            else:
+                # Create an ExternalLink to whatever file that has what we are targeting.
+                ref_link_source = target_builder.source
+        else:
+            # This is when we are not exporting and so export_source will be None.
+            # We use target_builder.source instead of builder source in case we creating an external link
+            # during write.
+            ref_link_source = target_builder.source
+
+        name = builder.name
         # Get the reference
-        zarr_ref = self._create_ref(target_builder)
-        # EXPORT WITH LINKS: Fix link source
-        # if the target and source are both the same, then we need to ALWAYS use ourselves as a source
-        # When exporting from one source to another, the LinkBuilders.source are not updated, i.e,. the
-        # builder.source and target_builder.source are not being updated and point to the old file, but
-        # for internal links (a.k.a, SoftLinks) they will be the same and our target will be part of
-        # our new file, so we can safely replace the source
-        if builder.source == target_builder.source:
-            zarr_ref.source = "."  # Link should be relative to self
-        # EXPORT WITH LINKS: Make sure target is written. If is not then if the target points to a
-        #                    non-Zarr source, then we need to copy the data instead of writing a
-        #                    link to the data
-        # When exporting from a different backend, then we may encounter external links to
-        # other datasets, groups (or links) in another file. Since they are from another
-        # backend, we must ensure that those targets are copied as well, so we check here
-        # if our target_builder has been written and write it if it doesn't
-        # TODO: Review the logic for when we need to copy data and when to link it. We may need the export_source?
-        """
-        skip_link = False
-        if not self.get_written(target_builder):
-            if not self.is_zarr_file(target_builder.source):
-                # We need to copy the target in place of the link so we need to
-                # change the name of target_builder to match the link instead
-                temp = copy(target_builder.name)
-                target_builder._Builder__name = name
-                # Skip writing the link since we copied the data into place
-                skip_link = True
-                if isinstance(target_builder, DatasetBuilder):
-                    self.write_dataset(parent=parent, builder=target_builder)
-                elif isinstance(target_builder, GroupBuilder):
-                    self.write_group(parent=parent, builder=target_builder)
-                elif isinstance(target_builder, LinkBuilder):
-                    self.write_link(parent=parent, builder=target_builder)
-                target_builder._Builder__name = temp
-        # REGULAR LINK I/O:
-        # Write the actual link as we should in most cases. Skip it only if we copied the
-        # data from an external source in place instead
-        if not skip_link:
-            self.__add_link__(parent, zarr_ref.source, zarr_ref.path, name)
-        """
+        zarr_ref = self._create_ref(builder, ref_link_source)
+
         self.__add_link__(parent, zarr_ref.source, zarr_ref.path, name)
         self._written_builders.set_written(builder)  # record that the builder has been written
 
@@ -1004,11 +1001,37 @@ class ZarrIO(HDMFIO):
         dset = None
         if isinstance(data, Array):
             # copy the dataset
+            data_filename = self.__get_store_path(data.store)
             if link_data:
-                path = self.__get_store_path(data.store)
-                self.__add_link__(parent, path, data.name, name)
-                linked = True
-                dset = None
+                if export_source is None: # not exporting
+                    self.__add_link__(parent, data_filename, data.name, name)
+                    linked = True
+                    dset = None
+                else: # exporting
+                    data_parent = '/'.join(data.name.split('/')[:-1])
+                    # Case 1: The dataset is NOT in the export source, create a link to preserve the external link.
+                    # I have three files, FileA, FileB, FileC. I want to export FileA to FileB. FileA has an
+                    # EXTERNAL link to a dataset in Filec. This case preserves the link to FileC to also be in FileB.
+                    if data_filename != export_source:
+                        self.__add_link__(parent, data_filename, data.name, name)
+                        linked = True
+                        dset = None
+                    # Case 2: If the dataset is in the export source and has a DIFFERENT path as the builder,
+                    # then create a link.
+                    # I have two files: FileA and FileB. I want to export FileA to FileB. FileA has an
+                    # INTERNAL link. This case preserves the link to also be in FileB.
+                    ###############
+                    elif parent.name != data_parent:
+                        self.__add_link__(parent, self.path, data.name, name)
+                        linked = True
+                        dset = None
+
+                    ###############
+                    # Case 3: The dataset is in the export source and has the SAME path as the builder, so copy.
+                    ###############
+                    else:
+                        zarr.copy(data, parent, name=name)
+                        dset = parent[name]
             else:
                 zarr.copy(data, parent, name=name)
                 dset = parent[name]
@@ -1016,7 +1039,7 @@ class ZarrIO(HDMFIO):
         elif isinstance(data, HDMFDataset):
             # If we have a dataset of containers we need to make the references to the containers
             if len(data) > 0 and isinstance(data[0], Container):
-                ref_data = [self._create_ref(data[i], export_source=export_source) for i in range(len(data))]
+                ref_data = [self._create_ref(data[i], ref_link_source=self.path) for i in range(len(data))]
                 shape = (len(data), )
                 type_str = 'object'
                 dset = parent.require_dataset(name,
@@ -1064,7 +1087,7 @@ class ZarrIO(HDMFIO):
                 for j, item in enumerate(data):
                     new_item = list(item)
                     for i in refs:
-                        new_item[i] = self._create_ref(item[i], export_source=export_source)
+                        new_item[i] = self._create_ref(item[i], ref_link_source=self.path)
                     new_items.append(tuple(new_item))
 
                 # Create dtype for storage, replacing values to match hdmf's hdf5 behavior
@@ -1105,14 +1128,16 @@ class ZarrIO(HDMFIO):
                 dset = self.__list_fill__(parent, name, data, options)
         # Write a dataset of references
         elif self.__is_ref(options['dtype']):
+            # Note: ref_link_source is set to self.path because we do not do external references
+            # We only support external links.
             if isinstance(data, ReferenceBuilder):
                 shape = (1,)
                 type_str = 'object'
-                refs = self._create_ref(data.builder, export_source=export_source)
+                refs = self._create_ref(data, ref_link_source=self.path)
             else:
                 shape = (len(data), )
                 type_str = 'object'
-                refs = [self._create_ref(item, export_source=export_source) for item in data]
+                refs = [self._create_ref(item, ref_link_source=self.path) for item in data]
 
             dset = parent.require_dataset(name,
                                           shape=shape,
@@ -1411,9 +1436,16 @@ class ZarrIO(HDMFIO):
         if name is None:
             name = str(os.path.basename(zarr_obj.name))
 
+        # Note: The source should be from the zarr object and not assumed to be
+        # from the file being read.
+        if isinstance(zarr_obj.store, ConsolidatedMetadataStore):
+            source = zarr_obj.store.store.path
+        else:
+            source = zarr_obj.store.path
+
         # Create the GroupBuilder
         attributes = self.__read_attrs(zarr_obj)
-        ret = GroupBuilder(name=name, source=self.source, attributes=attributes)
+        ret = GroupBuilder(name=name, source=source, attributes=attributes)
         ret.location = ZarrIO.get_zarr_parent_path(zarr_obj)
 
         # read sub groups
@@ -1472,11 +1504,16 @@ class ZarrIO(HDMFIO):
         else:
             raise ValueError("Dataset missing zarr_dtype: " + str(name) + "   " + str(zarr_obj))
 
+        if isinstance(zarr_obj.store, ConsolidatedMetadataStore):
+            source = zarr_obj.store.store.path
+        else:
+            source = zarr_obj.store.path
+
         kwargs = {"attributes": self.__read_attrs(zarr_obj),
                   "dtype": zarr_dtype,
                   "maxshape": zarr_obj.shape,
                   "chunks": not (zarr_obj.shape == zarr_obj.chunks),
-                  "source": self.source}
+                  "source": source}
         dtype = kwargs['dtype']
 
         # By default, use the zarr.core.Array as data for lazy data load

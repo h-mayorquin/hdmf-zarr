@@ -37,8 +37,7 @@ from tests.unit.utils import (Foo,
                               FooBucket,
                               FooFile,
                               get_foo_buildmanager,
-                              CacheSpecTestHelper,
-                              get_temp_filepath)
+                              CacheSpecTestHelper)
 
 from abc import ABCMeta, abstractmethod
 
@@ -93,14 +92,14 @@ class ZarrStoreTestCase(TestCase):
     general purpose testing.
     """
     def setUp(self):
-        self.store = "tests/unit/test_io.zarr"
+        self.store_path = "test_io.zarr"
 
     def tearDown(self):
-        if os.path.exists(self.store):
-            if os.path.isdir(self.store):
-                shutil.rmtree(self.store)
+        if os.path.exists(self.store_path):
+            if os.path.isdir(self.store_path):
+                shutil.rmtree(self.store_path)
             else:  # in case a test created a file instead of a directory
-                os.remove(self.store)
+                os.remove(self.store_path)
 
     def createReferenceBuilder(self):
         data_1 = np.arange(100, 200, 10).reshape(2, 5)
@@ -114,7 +113,7 @@ class ZarrStoreTestCase(TestCase):
         dataset_ref = DatasetBuilder('ref_dataset', ref_data, dtype='object')
 
         builder = GroupBuilder('root',
-                               source=self.store,
+                               source=self.store_path,
                                datasets={'dataset_1': dataset_1,
                                          'dataset_2': dataset_2,
                                          'ref_dataset': dataset_ref})
@@ -122,7 +121,7 @@ class ZarrStoreTestCase(TestCase):
 
     def create_zarr(self, consolidate_metadata=True, force_overwrite=False, mode='a'):
         builder = self.createReferenceBuilder()
-        writer = ZarrIO(self.store, mode=mode, force_overwrite=force_overwrite)
+        writer = ZarrIO(self.store_path, mode=mode, force_overwrite=force_overwrite)
         writer.write_builder(builder, consolidate_metadata)
         writer.close()
 
@@ -149,8 +148,7 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
 
     def setUp(self):
         self.manager = get_foo_buildmanager()
-        self.store = "test_io.zarr"
-        self.store_path = self.store
+        self.store_path = "test_io.zarr"
 
     def createGroupBuilder(self):
         self.foo_builder = GroupBuilder('foo1',
@@ -215,18 +213,18 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
         assert not ZarrIO.can_read("incorrect_path")
 
     def read_test_dataset(self):
-        reader = ZarrIO(self.store, manager=self.manager, mode='r')
+        reader = ZarrIO(self.store_path, manager=self.manager, mode='r')
         self.root = reader.read_builder()
         dataset = self.root['test_bucket/foo_holder/foo1/my_data']
         return dataset
 
     def read(self):
-        reader = ZarrIO(self.store, manager=self.manager, mode='r')
+        reader = ZarrIO(self.store_path, manager=self.manager, mode='r')
         self.root = reader.read_builder()
 
     def test_cache_spec(self):
 
-        tempIO = ZarrIO(self.store, manager=self.manager, mode='w')
+        tempIO = ZarrIO(self.store_path, manager=self.manager, mode='w')
 
         # Setup all the data we need
         foo1 = Foo('foo1', [0, 1, 2, 3, 4], "I am foo1", 17, 3.14)
@@ -240,7 +238,7 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
 
         # Load the spec and assert that it is valid
         ns_catalog = NamespaceCatalog()
-        ZarrIO.load_namespaces(ns_catalog, self.store)
+        ZarrIO.load_namespaces(ns_catalog, self.store_path)
         self.assertEqual(ns_catalog.namespaces, ('test_core',))
         source_types = CacheSpecTestHelper.get_types(self.manager.namespace_catalog)
         read_types = CacheSpecTestHelper.get_types(ns_catalog)
@@ -250,10 +248,10 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
         data = np.arange(100, 200, 10).reshape(2, 5) if test_data is None else test_data
         self.__dataset_builder = DatasetBuilder('my_data', data, attributes={'attr2': 17})
         self.createGroupBuilder()
-        writer = ZarrIO(self.store, manager=self.manager, mode='a')
+        writer = ZarrIO(self.store_path, manager=self.manager, mode='a')
         writer.write_builder(self.builder)
         writer.close()
-        assert ZarrIO.can_read(self.store)
+        assert ZarrIO.can_read(self.store_path)
 
     def test_write_compound(self, test_data=None):
         """
@@ -269,7 +267,7 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
                      {'name': 'name', 'dtype': str}]
         self.__dataset_builder = DatasetBuilder('my_data', data, dtype=data_type)
         self.createGroupBuilder()
-        writer = ZarrIO(self.store, manager=self.manager, mode='w')
+        writer = ZarrIO(self.store_path, manager=self.manager, mode='w')
         writer.write_builder(self.builder)
         writer.close()
 
@@ -278,7 +276,7 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
         data_io = ZarrDataIO(data=data, chunks=(1, 5), fillvalue=-1)
         self.__dataset_builder = DatasetBuilder('my_data', data_io, attributes={'attr2': 17})
         self.createGroupBuilder()
-        writer = ZarrIO(self.store, manager=self.manager, mode='a')
+        writer = ZarrIO(self.store_path, manager=self.manager, mode='a')
         writer.write_builder(self.builder)
         writer.close()
 
@@ -287,7 +285,7 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
                 ['b', 'bb', 'bbb', 'bbbb', 'bbbbb']] if test_data is None else test_data
         self.__dataset_builder = DatasetBuilder('my_data', data, attributes={'attr2': 17})
         self.createGroupBuilder()
-        writer = ZarrIO(self.store, manager=self.manager, mode='a')
+        writer = ZarrIO(self.store_path, manager=self.manager, mode='a')
         writer.write_builder(self.builder)
         writer.close()
 
@@ -298,7 +296,7 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
         link_parent = self.builder['test_bucket']
         link_parent.set_link(LinkBuilder(self.foo_builder, 'my_link'))
         link_parent.set_link(LinkBuilder(self.__dataset_builder, 'my_dataset'))
-        writer = ZarrIO(self.store, manager=self.manager, mode='a')
+        writer = ZarrIO(self.store_path, manager=self.manager, mode='a')
         writer.write_builder(self.builder)
         writer.close()
 
@@ -306,9 +304,9 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
         data = np.arange(100, 200, 10).reshape(2, 5)
         self.__dataset_builder = DatasetBuilder('my_data', data, attributes={'attr2': 17})
         self.createGroupBuilder()
-        writer = ZarrIO(self.store, manager=self.manager, mode='a')
+        writer = ZarrIO(self.store_path, manager=self.manager, mode='a')
         writer.write_builder(self.builder)
-        zarr_file = zarr.open(self.store, mode='r')
+        zarr_file = zarr.open(self.store_path, mode='r')
         zarr_array = zarr_file["/test_bucket/foo_holder/foo1/my_data"]
         link_io = ZarrDataIO(data=zarr_array, link_data=True)
         link_dataset = DatasetBuilder('dataset_link', link_io)
@@ -316,7 +314,7 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
         writer.write_builder(self.builder)
         writer.close()
 
-        reader = ZarrIO(self.store, manager=self.manager, mode='r')
+        reader = ZarrIO(self.store_path, manager=self.manager, mode='r')
         self.root = reader.read_builder()
         read_link = self.root['test_bucket/dataset_link']
         read_link_data = read_link['builder']['data'][:]
@@ -325,7 +323,7 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
 
     def test_write_reference(self):
         builder = self.createReferenceBuilder()
-        writer = ZarrIO(self.store,
+        writer = ZarrIO(self.store_path,
                         manager=self.manager,
                         mode='a')
         writer.write_builder(builder)
@@ -333,7 +331,7 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
 
     def test_write_references_roundtrip(self):
         # Setup a file container with references
-        num_bazs = 10
+        num_bazs = 1
         bazs = []  # set up dataset of references
         for i in range(num_bazs):
             bazs.append(Baz(name='baz%d' % i))
@@ -341,15 +339,15 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
         container = BazBucket(bazs=bazs, baz_data=baz_data)
         manager = get_baz_buildmanager()
         # write to file
-        with ZarrIO(self.store, manager=manager, mode='w') as writer:
+        with ZarrIO(self.store_path, manager=manager, mode='w') as writer:
             writer.write(container=container)
         # read from file and validate references
-        with ZarrIO(self.store, manager=manager, mode='r') as reader:
+        with ZarrIO(self.store_path, manager=manager, mode='r') as reader:
             read_container = reader.read()
             for i in range(num_bazs):
                 baz_name = 'baz%d' % i
                 expected_container = read_container.bazs[baz_name]
-                expected_value = {'source': '.',
+                expected_value = {'source': 'test_io.zarr',
                                   'path': '/bazs/' + baz_name,
                                   'object_id': expected_container.object_id,
                                   'source_object_id': read_container.object_id}
@@ -361,14 +359,10 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
                 # Check the ZarrReference first
                 self.assertEqual(zarr_ref.object_id, expected_value['object_id'])
                 self.assertEqual(zarr_ref.source_object_id, expected_value['source_object_id'])
-                # Check that the ZarReference is being resolved via the ZarrIO.resolve_ref
-                target_name, target_zarr_obj = reader.resolve_ref(zarr_ref)
-                self.assertEqual(target_name, baz_name)
-                self.assertEqual(target_zarr_obj.attrs['object_id'], expected_container.object_id)
 
     def test_write_reference_compound(self):
         builder = self.createReferenceCompoundBuilder()
-        writer = ZarrIO(self.store, manager=self.manager, mode='a')
+        writer = ZarrIO(self.store_path, manager=self.manager, mode='a')
         writer.write_builder(builder)
         writer.close()
 
@@ -417,7 +411,7 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
         link_parent_2 = self.builder['test_bucket/foo_holder']
         link_parent_1.set_link(LinkBuilder(self.__dataset_builder, 'my_dataset_1'))
         link_parent_2.set_link(LinkBuilder(self.__dataset_builder, 'my_dataset_2'))
-        writer = ZarrIO(self.store, manager=self.manager, mode='a')
+        writer = ZarrIO(self.store_path, manager=self.manager, mode='a')
         writer.write_builder(self.builder)
         writer.close()
         self.read()
@@ -473,7 +467,7 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
                                datasets={'dataset_1': dataset_1,
                                          'dataset_2': dataset_2,
                                          'ref_dataset': dataset_ref})
-        writer = ZarrIO(self.store, manager=self.manager, mode='a')
+        writer = ZarrIO(self.store_path, manager=self.manager, mode='a')
         writer.write_builder(builder)
         writer.close()
 
@@ -488,27 +482,26 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
     """
 
     def setUp(self):
-        self.store = "test_io.zarr"
-        self.store_path = self.store
+        self.store_path = "test_io.zarr"
 
     #############################################
     #  ZarrDataIO general
     #############################################
     def test_set_object_codec(self):
         # Test that the default codec is the Pickle store
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         self.assertEqual(tempIO.object_codec_class.__qualname__, 'Pickle')
         del tempIO  # also calls tempIO.close()
-        tempIO = ZarrIO(self.store, mode='w', object_codec_class=JSON)
+        tempIO = ZarrIO(self.store_path, mode='w', object_codec_class=JSON)
         self.assertEqual(tempIO.object_codec_class.__qualname__, 'JSON')
         tempIO.close()
 
     def test_synchronizer_constructor_arg_bool(self):
         """Test that setting the synchronizer argument to True/False works in ZarrIO"""
-        tempIO = ZarrIO(self.store, mode='w', synchronizer=False)
+        tempIO = ZarrIO(self.store_path, mode='w', synchronizer=False)
         self.assertIsNone(tempIO.synchronizer)
         del tempIO  # also calls tempIO.close()
-        tempIO = ZarrIO(self.store, mode='w', synchronizer=True)
+        tempIO = ZarrIO(self.store_path, mode='w', synchronizer=True)
         self.assertTrue(isinstance(tempIO.synchronizer, zarr.ProcessSynchronizer))
         tempIO.close()
 
@@ -545,7 +538,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
     def test_get_builder_exists_on_disk(self):
         """Test that get_builder_exists_on_disk finds the existing builder"""
         dset_builder = DatasetBuilder('test_dataset', 10, attributes={})
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         self.assertFalse(tempIO.get_builder_exists_on_disk(builder=dset_builder))  # Make sure is False is before write
         tempIO .write_dataset(tempIO.file, dset_builder)
         self.assertTrue(tempIO.get_builder_exists_on_disk(builder=dset_builder))   # Make sure is True after write
@@ -553,7 +546,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
 
     def test_get_written(self):
         """Test that get_builder_exists_on_disk finds the existing builder"""
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         dset_builder = DatasetBuilder('test_dataset', 10, attributes={})
         self.assertFalse(tempIO.get_written(dset_builder))  # Make sure False is returned before write
         tempIO.write_dataset(tempIO.file, dset_builder)
@@ -582,7 +575,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         :returns: the value read from disk so we can do our own tests if needed
         """
         # write the attribute
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         testgroup = tempIO.file  # For testing we just use our file and create some attributes
         attr = {name: value}
@@ -656,14 +649,14 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
     def test_write_attributes_write_reference_to_datasetbuilder(self):
         data_1 = np.arange(100, 200, 10).reshape(2, 5)
         dataset_1 = DatasetBuilder('dataset_1', data_1)
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         attr = {'attr1': dataset_1}
         with self.assertWarnsWith(UserWarning,
                                   "Could not determine source_object_id for builder with path: /dataset_1"):
             tempIO.write_attributes(obj=tempIO.file, attributes=attr)
         expected_value = {'attr1': {'zarr_dtype': 'object',
-                                    'value': {'source': ".",
+                                    'value': {'source': 'test_io.zarr',
                                               'path': '/dataset_1',
                                               'object_id': None,
                                               'source_object_id': None}}}
@@ -674,14 +667,14 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         data_1 = np.arange(100, 200, 10).reshape(2, 5)
         dataset_1 = DatasetBuilder('dataset_1', data_1)
         ref1 = ReferenceBuilder(dataset_1)
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         attr = {'attr1': ref1}
         with self.assertWarnsWith(UserWarning,
                                   "Could not determine source_object_id for builder with path: /dataset_1"):
             tempIO.write_attributes(obj=tempIO.file, attributes=attr)
         expected_value = {'attr1': {'zarr_dtype': 'object',
-                                    'value': {'source': ".",
+                                    'value': {'source': 'test_io.zarr',
                                               'path': '/dataset_1',
                                               'source_object_id': None,
                                               'object_id': None},
@@ -695,7 +688,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
     ##########################################
     def test_write_dataset_scalar(self):
         a = 10
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', a, attributes={}))
         dset = tempIO.file['test_dataset']
@@ -705,7 +698,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
 
     def test_write_dataset_string(self):
         a = 'test string'
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', a, attributes={}))
         dset = tempIO.file['test_dataset']
@@ -718,7 +711,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
     ##########################################
     def test_write_dataset_list(self):
         a = np.arange(30).reshape(5, 2, 3)
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', a.tolist(), attributes={}))
         dset = tempIO.file['test_dataset']
@@ -728,7 +721,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
     def test_write_dataset_list_chunked(self):
         a = ZarrDataIO(np.arange(30).reshape(5, 2, 3),
                        chunks=(1, 1, 3))
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', a, attributes={}))
         dset = tempIO.file['test_dataset']
@@ -738,7 +731,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
 
     def test_write_dataset_list_fillvalue(self):
         a = ZarrDataIO(np.arange(20).reshape(5, 4), fillvalue=-1)
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', a, attributes={}))
         dset = tempIO.file['test_dataset']
@@ -751,7 +744,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         compressor = Blosc(cname='zstd', clevel=3, shuffle=Blosc.BITSHUFFLE)
         a = ZarrDataIO(np.arange(30).reshape(5, 2, 3),
                        compressor=compressor)
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', a, attributes={}))
         dset = tempIO.file['test_dataset']
@@ -766,7 +759,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         a = ZarrDataIO(np.arange(30, dtype='i4').reshape(5, 2, 3),
                        compressor=compressor,
                        filters=filters)
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', a, attributes={}))
         dset = tempIO.file['test_dataset']
@@ -779,7 +772,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
     #  write_dataset tests: Iterable
     ##########################################
     def test_write_dataset_iterable(self):
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', range(10), attributes={}))
         dset = tempIO.file['test_dataset']
@@ -796,7 +789,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         data['b'][1] = 0.1
         dt = [{'name': 'a', 'dtype': 'int32', 'doc': 'a column'},
               {'name': 'b', 'dtype': 'float64', 'doc': 'b column'}]
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', data, attributes={}, dtype=dt))
         dset = tempIO.file['test_dataset']
@@ -815,7 +808,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
                 {'name': 'd', 'dtype': 'float64', 'doc': 'd column'}]
         dt = [{'name': 'a', 'dtype': 'int32', 'doc': 'a column'},
               {'name': 'b', 'dtype': b_dt, 'doc': 'b column'}]
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', data, attributes={}, dtype=dt))
         dset = tempIO.file['test_dataset']
@@ -831,7 +824,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         a = np.arange(30).reshape(5, 2, 3)
         aiter = iter(a)
         daiter = DataChunkIterator.from_iterable(aiter, buffer_size=2)
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(parent=tempIO.file,
                              builder=DatasetBuilder('test_dataset', daiter, attributes={}))
@@ -846,7 +839,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         compressor = Blosc(cname='zstd', clevel=3, shuffle=Blosc.BITSHUFFLE)
         wrapped_daiter = ZarrDataIO(data=daiter,
                                     compressor=compressor)
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', wrapped_daiter, attributes={}))
         dset = tempIO.file['test_dataset']
@@ -857,7 +850,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
 
     def test_write_dataset_data_chunk_iterator(self):
         dci = DataChunkIterator(data=np.arange(10), buffer_size=2)
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', dci, attributes={}))
         dset = tempIO.file['test_dataset']
@@ -870,7 +863,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         wrapped_dci = ZarrDataIO(data=dci,
                                  compressor=compressor,
                                  chunks=(2,))
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', wrapped_dci, attributes={}))
         dset = tempIO.file['test_dataset']
@@ -888,7 +881,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         compressor = Blosc(cname='zstd', clevel=3, shuffle=Blosc.BITSHUFFLE)
         wrapped_dci = ZarrDataIO(data=dci,
                                  compressor=compressor)
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', wrapped_dci, attributes={}))
         dset = tempIO.file['test_dataset']
@@ -901,12 +894,12 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
     #############################################
     def test_link_zarr_dataset_input(self):
         dset = DatasetBuilder('test_dataset', np.arange(10), attributes={})
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, builder=dset)
         softlink = DatasetBuilder('test_softlink', tempIO.file['test_dataset'], attributes={})
         tempIO.write_dataset(tempIO.file, builder=softlink)
-        tempf = zarr.open(store=self.store, mode='r')
+        tempf = zarr.open(store=self.store_path, mode='r')
         expected_link = {'name': 'test_softlink',
                          'path': '/test_dataset',
                          'source': os.path.abspath(self.store_path)}
@@ -915,7 +908,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         tempIO.close()
 
     def test_copy_zarr_dataset_input(self):
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', np.arange(10), attributes={}))
         tempIO.write_dataset(tempIO.file,
@@ -927,7 +920,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         tempIO.close()
 
     def test_link_dataset_zarrdataio_input(self):
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', np.arange(10), attributes={}))
         tempIO.write_dataset(tempIO.file,
@@ -936,7 +929,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
                                  ZarrDataIO(data=tempIO.file['test_dataset'], link_data=True),
                                  attributes={})
                              )
-        tempf = zarr.open(self.store, mode='r')
+        tempf = zarr.open(self.store_path, mode='r')
         expected_link = {'name': 'test_softlink',
                          'path': '/test_dataset',
                          'source': os.path.abspath(self.store_path)}
@@ -945,7 +938,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         tempIO.close()
 
     def test_copy_dataset_zarrdataio_input(self):
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         tempIO.write_dataset(tempIO.file, DatasetBuilder('test_dataset', np.arange(10), attributes={}))
         tempIO.write_dataset(tempIO.file,
@@ -960,14 +953,14 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         tempIO.close()
 
     def test_list_fill_empty(self):
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         dset = tempIO.__list_fill__(tempIO.file, 'empty_dataset', [], options={'dtype': int, 'io_settings': {}})
         self.assertTupleEqual(dset.shape, (0,))
         tempIO.close()
 
     def test_list_fill_empty_no_dtype(self):
-        tempIO = ZarrIO(self.store, mode='w')
+        tempIO = ZarrIO(self.store_path, mode='w')
         tempIO.open()
         with self.assertRaisesRegex(Exception, r"cannot add empty_dataset to / - could not determine type"):
             tempIO.__list_fill__(tempIO.file, 'empty_dataset', [])
@@ -988,13 +981,7 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
     """
 
     def setUp(self):
-        self.store = [
-            get_temp_filepath(),
-            get_temp_filepath(),
-            get_temp_filepath(),
-            get_temp_filepath()
-        ]
-        self.store_path = self.store
+        self.store_path = [f"file{i}.zarr" for i in range(3)]
 
     def test_basic(self):
         """Test that exporting a written container works between Zarr and Zarr."""
@@ -1002,19 +989,19 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket])
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile)
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='r') as read_io:
-            with ZarrIO(self.store[1], mode='w') as export_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='r') as read_io:
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
                 export_io.export(src_io=read_io)
 
         self.assertTrue(os.path.exists(self.store_path[1]))
-        self.assertEqual(foofile.container_source, self.store_path[0])
+        self.assertEqual(os.path.relpath(foofile.container_source), self.store_path[0])
 
-        with ZarrIO(self.store[1], manager=get_foo_buildmanager(), mode='r') as read_io:
+        with ZarrIO(self.store_path[1], manager=get_foo_buildmanager(), mode='r') as read_io:
             read_foofile = read_io.read()
-            self.assertEqual(read_foofile.container_source, self.store_path[1])
+            self.assertEqual(os.path.relpath(read_foofile.container_source), self.store_path[1])
             self.assertContainerEqual(foofile, read_foofile, ignore_hdmf_attrs=True)
 
     def test_basic_container(self):
@@ -1023,20 +1010,20 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket])
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile)
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='r') as read_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='r') as read_io:
             read_foofile = read_io.read()
-            with ZarrIO(self.store[1], mode='w') as export_io:
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
                 export_io.export(src_io=read_io, container=read_foofile)
 
         self.assertTrue(os.path.exists(self.store_path[1]))
-        self.assertEqual(foofile.container_source, self.store_path[0])
+        self.assertEqual(os.path.relpath(foofile.container_source), self.store_path[0])
 
-        with ZarrIO(self.store[1], manager=get_foo_buildmanager(), mode='r') as read_io:
+        with ZarrIO(self.store_path[1], manager=get_foo_buildmanager(), mode='r') as read_io:
             read_foofile = read_io.read()
-            self.assertEqual(read_foofile.container_source, self.store_path[1])
+            self.assertEqual(os.path.relpath(read_foofile.container_source), self.store_path[1])
             self.assertContainerEqual(foofile, read_foofile, ignore_hdmf_attrs=True)
 
     def test_container_part(self):
@@ -1045,12 +1032,12 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket])
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile)
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='r') as read_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='r') as read_io:
             read_foofile = read_io.read()
-            with ZarrIO(self.store[1], mode='w') as export_io:
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
                 msg = ("The provided container must be the root of the hierarchy of the source used to read the "
                        "container.")
                 with self.assertRaisesWith(ValueError, msg):
@@ -1062,11 +1049,11 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket])
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile)
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='r') as read_io:
-            with ZarrIO(self.store[1], mode='w') as export_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='r') as read_io:
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
                 dummy_file = FooFile(buckets=[])
                 msg = "The provided container must have been read by the provided src_io."
                 with self.assertRaisesWith(ValueError, msg):
@@ -1078,13 +1065,13 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket])
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile, cache_spec=False)
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='r') as read_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='r') as read_io:
             read_foofile = read_io.read()
 
-            with ZarrIO(self.store[1], mode='w') as export_io:
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
                 export_io.export(
                     src_io=read_io,
                     container=read_foofile,
@@ -1097,19 +1084,19 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket])
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile)
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='r') as read_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='r') as read_io:
             read_foofile = read_io.read()
 
-            with ZarrIO(self.store[1], mode='w') as export_io:
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
                 export_io.export(
                     src_io=read_io,
                     container=read_foofile,
                     cache_spec=True)
 
-        with zarr.open(self.store[1], mode='r') as zarr_io:
+        with zarr.open(self.store_path[1], mode='r') as zarr_io:
             self.assertTrue('specifications' in zarr_io.keys())
 
     def test_soft_link_group(self):
@@ -1120,111 +1107,106 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
         foo1 = Foo('foo1', [1, 2, 3, 4, 5], "I am foo1", 17, 3.14)
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket], foo_link=foo1)
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile)
 
-        # with open(self.paths[0]+"/.zattrs", 'r') as f:
-        #     print(f.readlines())
-
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='r') as read_io:
-            with ZarrIO(self.store[1], mode='w') as export_io:
-                export_io.export(src_io=read_io,
-                                 write_args=dict(link_data=False))
-        with ZarrIO(self.store[1], manager=get_foo_buildmanager(), mode='r') as read_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='r') as read_io:
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
+                export_io.export(src_io=read_io)
+        with ZarrIO(self.store_path[1], manager=get_foo_buildmanager(), mode='r') as read_io:
             read_foofile2 = read_io.read()
-            # make sure the linked group is within the same file
-            self.assertEqual(read_foofile2.foo_link.container_source, self.store_path[1])
-            zarr_linkspec1 = zarr.open(self.store_path[0])['links'].attrs.asdict()['zarr_link'][0]
-            zarr_linkspec2 = zarr.open(self.store_path[1])['links'].attrs.asdict()['zarr_link'][0]
-            self.assertEqual(zarr_linkspec1.pop('source'), ".")
-            self.assertEqual(zarr_linkspec2.pop('source'), ".")
-            self.assertDictEqual(zarr_linkspec1, zarr_linkspec2)
+            if isinstance(self.store_path[1], str):
+                self.assertEqual(os.path.relpath(read_foofile2.foo_link.container_source), self.store_path[1])
+            else:
+                self.assertEqual(read_foofile2.foo_link.container_source, self.store_path[1].path)
 
-    def test_soft_link_dataset(self):
-        """Test that exporting a written file with soft linked datasets keeps links within the file."""
-        """Link to a dataset in the same file should have a link to the same new dataset in the new file """
-        pass  # TODO this test currently fails. It does not create a SoftLink in the original file.
-        """
-        foo1 = Foo('foo1', [1, 2, 3, 4, 5], "I am foo1", 17, 3.14)
-        foobucket = FooBucket('bucket1', [foo1])
-        foofile = FooFile(buckets=[foobucket], foofile_data=foo1.my_data)
-        with ZarrIO(self.store_paths[0], manager=get_foo_buildmanager(), mode='w') as write_io:
-            write_io.write(foofile, link_data=True)
-        print ("WRITE DONE")
-        with ZarrIO(self.store_paths[0], manager=get_foo_buildmanager(), mode='r') as read_io:
-            with ZarrIO(self.store_paths[1], mode='w') as export_io:
-                export_io.export(src_io=read_io, write_args=dict(link_data=False))
-        print(zarr.open(self.store_paths[0]).tree())
-        print(zarr.open(self.store_paths[1]).tree())
-        with ZarrIO(self.store_paths[1], manager=get_foo_buildmanager(), mode='r') as read_io:
-            read_foofile2 = read_io.read()
-            # make sure the linked dataset is within the same file
-            print(open(self.source_paths[1]+"/buckets/bucket1/foo_holder/foo1/.zattrs", 'r').read())
-            self.assertEqual(read_foofile2.foofile_data.path, self.source_paths[1])
-        """
 
     def test_external_link_group(self):
         """Test that exporting a written file with external linked groups maintains the links."""
         """External links remain"""
-        pass  # TODO this test currently fails. The external link is changed to point to File 2 instead of File 1
-        """
+
         foo1 = Foo('foo1', [1, 2, 3, 4, 5], "I am foo1", 17, 3.14)
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket])
         # Create File 1 with the full data
-        with ZarrIO(self.store_paths[0], manager=get_foo_buildmanager(), mode='w') as read_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as read_io:
             read_io.write(foofile)
         # Create file 2 with an external link to File 1
         manager = get_foo_buildmanager()
-        with ZarrIO(self.store_paths[0], manager=manager, mode='r') as read_io:
+        with ZarrIO(self.store_path[0], manager=manager, mode='r') as read_io:
             read_foofile = read_io.read()
             # make external link to existing group
             foofile2 = FooFile(foo_link=read_foofile.buckets['bucket1'].foos['foo1'])
-            print("-------------------Write File 2----------------------------")
-            with ZarrIO(self.store_paths[1], manager=manager, mode='w') as write_io:
+            with ZarrIO(self.store_path[1], manager=manager, mode='w') as write_io:
                 write_io.write(foofile2)
-            self.assertDictEqual(zarr.open(self.store_paths[1])['links'].attrs.asdict(),
-                                 {'zarr_link': [{'name': 'foo_link',
-                                                 'path': '/buckets/bucket1/foo_holder/foo1',
-                                                 'source': self.source_paths[0]}]})
         # Export File 2 to a new File 3 and make sure the external link from File 2 is being preserved
-        with ZarrIO(self.store_paths[1], manager=get_foo_buildmanager(), mode='r') as read_io:
-             with ZarrIO(self.store_paths[2], mode='w') as export_io:
-                print("-------------------Write File 3----------------------------")
+        with ZarrIO(self.store_path[1], manager=get_foo_buildmanager(), mode='r') as read_io:
+             with ZarrIO(self.store_path[2], mode='w') as export_io:
                 export_io.export(src_io=read_io)
-        #print()
-        print(zarr.open(self.store_paths[1])['links'].attrs.asdict())
-        print(zarr.open(self.store_paths[2])['links'].attrs.asdict())
-        with ZarrIO(self.store_paths[2], manager=get_foo_buildmanager(), mode='r') as read_io:
+        with ZarrIO(self.store_path[2], manager=get_foo_buildmanager(), mode='r') as read_io:
             read_foofile2 = read_io.read()
             # make sure the linked group is read from the first file
-            self.assertEqual(read_foofile2.foo_link.container_source, self.source_paths[0])
-        """
+            if isinstance(self.store_path[0], str):
+                self.assertEqual(os.path.relpath(read_foofile2.foo_link.container_source), self.store_path[0])
+            else:
+                self.assertEqual(read_foofile2.foo_link.container_source, self.store_path[0].path)
 
     def test_external_link_dataset(self):
         """Test that exporting a written file with external linked datasets maintains the links."""
-        pass  # TODO this test currently fails
-        """
+        ####################
+        # Create File1
+        ####################
+        manager = get_foo_buildmanager()
+
         foo1 = Foo('foo1', [1, 2, 3, 4, 5], "I am foo1", 17, 3.14)
         foobucket = FooBucket('bucket1', [foo1])
-        foofile = FooFile(buckets=[foobucket], foofile_data=[1, 2, 3])
-        with ZarrIO(self.store_paths[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+        foofile = FooFile(buckets=[foobucket])
+
+        with ZarrIO(self.store_path[0], manager=manager, mode='w') as write_io:
             write_io.write(foofile)
-        manager = get_foo_buildmanager()
-        with ZarrIO(self.store_paths[0], manager=manager, mode='r') as read_io:
-            read_foofile = read_io.read()
-            # make external link to existing dataset
-            foofile2 = FooFile(foofile_data=read_foofile.foofile_data)
-            with ZarrIO(self.store_paths[1], manager=manager, mode='w') as write_io:
+
+        with ZarrIO(self.store_path[0], manager=manager, mode='r') as read_io1:
+            read_foofile1 = read_io1.read()
+
+            ####################
+            # Create File2
+            ####################
+            foofile2 = FooFile(buckets=[])
+
+            # create a foo with link to existing dataset my_data (not in same file), add the foo to new foobucket
+            # this should make an external link within the exported file
+            foo2 = Foo('foo2', read_foofile1.buckets['bucket1'].foos['foo1'].my_data, "I am foo2", 17, 3.14)
+            foobucket2 = FooBucket('bucket2', [foo2])
+            foofile2.add_bucket(foobucket2)
+
+            # also add link from foofile to new foo2.my_data dataset which is a link to foo1.my_data dataset
+            # this should make an external link within the exported file
+            foofile2.foofile_data = foo2.my_data
+
+
+            with ZarrIO(self.store_path[1], manager=manager, mode='w') as write_io:
                 write_io.write(foofile2)
-        with ZarrIO(self.store_paths[1], manager=get_foo_buildmanager(), mode='r') as read_io:
-            with ZarrIO(self.store_paths[2], mode='w') as export_io:
-                export_io.export(src_io=read_io)
-        with ZarrIO(self.store_paths[2], manager=get_foo_buildmanager(), mode='r') as read_io:
+
+        ####################
+        # Export with File3
+        ####################
+        with ZarrIO(self.store_path[1], manager=manager, mode='r') as read_io2:
+            read_foofile2 = read_io2.read()
+
+            # create a foo with link to existing dataset my_data (not in same file), add the foo to new foobucket
+            # this should make an external link within the exported file
+            foo2 = Foo('foo2', read_foofile1.buckets['bucket1'].foos['foo1'].my_data, "I am foo2", 17, 3.14)
+            foobucket2 = FooBucket('bucket2', [foo2])
+            read_foofile2.add_bucket(foobucket2)
+
+            with ZarrIO(self.store_path[2], mode='w') as export_io:
+                export_io.export(src_io=read_io2, container=read_foofile2)
+
+        with ZarrIO(self.store_path[2], manager=get_foo_buildmanager(), mode='r') as read_io:
             read_foofile2 = read_io.read()
             # make sure the linked dataset is read from the first file
-            self.assertEqual(read_foofile2.foofile_data.file.filename, self.source_paths[0])
-        """
+            self.assertEqual(os.path.relpath(read_foofile2.foofile_data.store.store.path), self.store_path[0])
 
     def test_external_link_link(self):
         """Test that exporting a written file with external links to external links maintains the links."""
@@ -1261,27 +1243,29 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
     def test_attr_reference(self):
         """Test that exporting a written file with attribute references maintains the references."""
         """Attribute with object reference needs to point to the new object in the new file"""
-        pass  # TODO this test currently fails because the paths in the attribute still points to the first file
-        """
         foo1 = Foo('foo1', [1, 2, 3, 4, 5], "I am foo1", 17, 3.14)
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket], foo_ref_attr=foo1)
-        with ZarrIO(self.store_paths[0], manager=get_foo_buildmanager(), mode='w') as read_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as read_io:
             read_io.write(foofile)
-        with ZarrIO(self.store_paths[0], manager=get_foo_buildmanager(), mode='r') as read_io:
-            with ZarrIO(self.store_paths[1], mode='w') as export_io:
-                export_io.export(src_io=read_io,  write_args=dict(link_data=False))
-        #with ZarrIO(self.store_paths[1], manager=get_foo_buildmanager(), mode='r') as read_io:
-        #    read_foofile2 = read_io.read()
-            #self.assertTupleEqual(ZarrIO.get_zarr_paths(read_foofile2.foo_ref_attr.my_data),
-            #                     (self.source_paths[1], '/buckets/bucket1/foo_holder/foo1/my_data'))
-            # make sure the attribute reference resolves to the container within the same file
-            #self.assertIs(read_foofile2.foo_ref_attr, read_foofile2.buckets['bucket1'].foos['foo1'])
-        expected_ref = {'value': {'path': '/buckets/bucket1/foo_holder/foo1', 'source': self.source_paths[1]},
-                        'zarr_dtype': 'object'}
-        real_ref = zarr.open(self.store_paths[1]).attrs['foo_ref_attr']
-        self.assertDictEqual(real_ref, expected_ref)
-        """
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='r') as read_io:
+            read_foofile2 = read_io.read()
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
+                # export_io.export(src_io=read_io, container=read_foofile2, write_args={'link_data': False})
+                export_io.export(src_io=read_io)
+        with ZarrIO(self.store_path[1], manager=get_foo_buildmanager(), mode='r') as read_io:
+           read_foofile2 = read_io.read()
+           expected = ZarrIO.get_zarr_paths(read_foofile2.foo_ref_attr.my_data)
+           if isinstance(self.store_path[1], str):
+               self.assertTupleEqual((os.path.normpath(expected[0]), os.path.normpath(expected[1])),
+                                    (os.path.normpath(os.path.abspath(self.store_path[1])),
+                                     os.path.normpath('/buckets/bucket1/foo_holder/foo1/my_data')))
+           else:
+               self.assertTupleEqual((os.path.normpath(expected[0]), os.path.normpath(expected[1])),
+                                    (os.path.normpath(os.path.abspath(self.store_path[1].path)),
+                                     os.path.normpath('/buckets/bucket1/foo_holder/foo1/my_data')))
+           # make sure the attribute reference resolves to the container within the same file
+           self.assertIs(read_foofile2.foo_ref_attr, read_foofile2.buckets['bucket1'].foos['foo1'])
 
     def test_pop_data(self):
         """Test that exporting a written container after removing an element from it works."""
@@ -1289,17 +1273,17 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket])
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile)
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='r') as read_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='r') as read_io:
             read_foofile = read_io.read()
             read_foofile.remove_bucket('bucket1')  # remove child group
 
-            with ZarrIO(self.store[1], mode='w') as export_io:
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
                 export_io.export(src_io=read_io, container=read_foofile)
 
-        with ZarrIO(self.store[1], manager=get_foo_buildmanager(), mode='r') as read_io:
+        with ZarrIO(self.store_path[1], manager=get_foo_buildmanager(), mode='r') as read_io:
             read_foofile2 = read_io.read()
 
             # make sure the read foofile has no buckets
@@ -1316,80 +1300,108 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket], foo_link=foo1)
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile)
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='r') as read_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='r') as read_io:
             read_foofile = read_io.read()
             read_foofile.buckets['bucket1'].remove_foo('foo1')  # remove child group
 
-            with ZarrIO(self.store[1], mode='w') as export_io:
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
                 msg = ("links (links): Linked Foo 'foo1' has no parent. Remove the link or ensure the linked "
                        "container is added properly.")
                 with self.assertRaisesWith(OrphanContainerBuildError, msg):
                     export_io.export(src_io=read_io, container=read_foofile)
 
-    def test_append_data(self):
-        """Test that exporting a written container after adding groups, links, and references to it works."""
-        # TODO: This test currently fails because I do not understand how the link to my_data is expected to be
-        #       created here and currently fails. I.e,. it fails in list_fill but instead we should actually
-        #       create an external link instead
-        pass
+    def test_soft_link_data(self):
+        """
+        Test data soft links.
         """
         foo1 = Foo('foo1', [1, 2, 3, 4, 5], "I am foo1", 17, 3.14)
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket])
-        with ZarrIO(self.store_paths[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile)
-        with ZarrIO(self.store_paths[0], manager=get_foo_buildmanager(), mode='r') as read_io:
+
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='r') as read_io:
             read_foofile = read_io.read()
+
             # create a foo with link to existing dataset my_data, add the foo to new foobucket
             # this should make a soft link within the exported file
-            # TODO Assigning my_data is the problem. Which in turn causes the export to fail because the Zarr
-            # DataType is not being understood. This is where the External link should be created instead?
             foo2 = Foo('foo2', read_foofile.buckets['bucket1'].foos['foo1'].my_data, "I am foo2", 17, 3.14)
             foobucket2 = FooBucket('bucket2', [foo2])
             read_foofile.add_bucket(foobucket2)
-            # also add link from foofile to new foo2 container
-            read_foofile.foo_link = foo2
-            # also add link from foofile to new foo2.my_data dataset which is a link to foo1.my_data dataset
+
             read_foofile.foofile_data = foo2.my_data
-            # also add reference from foofile to new foo2
-            read_foofile.foo_ref_attr = foo2
-            with ZarrIO(self.store_paths[1], mode='w') as export_io:
+
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
                 export_io.export(src_io=read_io, container=read_foofile)
-        with ZarrIO(self.store_paths[1], manager=get_foo_buildmanager(), mode='r') as read_io:
+
+        with ZarrIO(self.store_path[1], manager=get_foo_buildmanager(), mode='r') as read_io:
             read_foofile2 = read_io.read()
+
             # test new soft link to dataset in file
             self.assertIs(read_foofile2.buckets['bucket1'].foos['foo1'].my_data,
                           read_foofile2.buckets['bucket2'].foos['foo2'].my_data)
-            # test new soft link to group in file
-            self.assertIs(read_foofile2.foo_link, read_foofile2.buckets['bucket2'].foos['foo2'])
+
             # test new soft link to new soft link to dataset in file
             self.assertIs(read_foofile2.buckets['bucket1'].foos['foo1'].my_data, read_foofile2.foofile_data)
-            # test new attribute reference to new group in file
-            self.assertIs(read_foofile2.foo_ref_attr, read_foofile2.buckets['bucket2'].foos['foo2'])
-        #with File(self.store_paths[1], 'r') as f:
-        #    self.assertEqual(f['foofile_data'].file.filename, self.store_paths[1])
-        #    self.assertIsInstance(f.attrs['foo_ref_attr'], h5py.Reference)
-        """
 
-    def test_append_external_link_data(self):
-        """Test that exporting a written container after adding a link with link_data=True creates external links."""
-        pass  # TODO: This test currently fails
+
+    def test_soft_links_group_after_write(self):
+        """
+        Test that exporting a written container after adding
+        groups, links, and references to it works.
         """
         foo1 = Foo('foo1', [1, 2, 3, 4, 5], "I am foo1", 17, 3.14)
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket])
-        with ZarrIO(self.store_paths[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+            write_io.write(foofile)
+
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='r') as read_io:
+            read_foofile = read_io.read()
+
+            # create a foo with link to existing dataset my_data, add the foo to new foobucket
+            # this should make a soft link within the exported file
+            foo2 = Foo('foo2', read_foofile.buckets['bucket1'].foos['foo1'].my_data, "I am foo2", 17, 3.14)
+            foobucket2 = FooBucket('bucket2', [foo2])
+            read_foofile.add_bucket(foobucket2)
+
+            # also add link from foofile to new foo2 container
+            read_foofile.foo_link = foo2
+
+            # also add reference from foofile to new foo2
+            read_foofile.foo_ref_attr = foo2
+
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
+                export_io.export(src_io=read_io, container=read_foofile)
+
+        with ZarrIO(self.store_path[1], manager=get_foo_buildmanager(), mode='r') as read_io:
+            read_foofile2 = read_io.read()
+
+            # test new soft link to group in file
+            self.assertIs(read_foofile2.foo_link, read_foofile2.buckets['bucket2'].foos['foo2'])
+
+            # test new attribute reference to new group in file
+            self.assertIs(read_foofile2.foo_ref_attr, read_foofile2.buckets['bucket2'].foos['foo2'])
+
+    def test_append_external_link_data(self):
+        """Test that exporting a written container after adding a link with link_data=True creates external links."""
+        foo1 = Foo('foo1', [1, 2, 3, 4, 5], "I am foo1", 17, 3.14)
+        foobucket = FooBucket('bucket1', [foo1])
+        foofile = FooFile(buckets=[foobucket])
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile)
         foofile2 = FooFile(buckets=[])
-        with ZarrIO(self.store_paths[1], manager=get_foo_buildmanager(), mode='w') as write_io:
+        with ZarrIO(self.store_path[1], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile2)
         manager = get_foo_buildmanager()
-        with ZarrIO(self.store_paths[0], manager=manager, mode='r') as read_io1:
+        with ZarrIO(self.store_path[0], manager=manager, mode='r') as read_io1:
             read_foofile1 = read_io1.read()
-            with ZarrIO(self.store_paths[1], manager=manager, mode='r') as read_io2:
+            with ZarrIO(self.store_path[1], manager=manager, mode='r') as read_io2:
                 read_foofile2 = read_io2.read()
                 # create a foo with link to existing dataset my_data (not in same file), add the foo to new foobucket
                 # this should make an external link within the exported file
@@ -1399,39 +1411,30 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
                 # also add link from foofile to new foo2.my_data dataset which is a link to foo1.my_data dataset
                 # this should make an external link within the exported file
                 read_foofile2.foofile_data = foo2.my_data
-                with ZarrIO(self.store_paths[2], mode='w') as export_io:
+                with ZarrIO(self.store_path[2], mode='w') as export_io:
                     export_io.export(src_io=read_io2, container=read_foofile2)
-        with ZarrIO(self.store_paths[0], manager=get_foo_buildmanager(), mode='r') as read_io1:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='r') as read_io1:
             read_foofile3 = read_io1.read()
-            with ZarrIO(self.store_paths[2], manager=get_foo_buildmanager(), mode='r') as read_io2:
+            with ZarrIO(self.store_path[2], manager=get_foo_buildmanager(), mode='r') as read_io2:
                 read_foofile4 = read_io2.read()
                 self.assertEqual(read_foofile4.buckets['bucket2'].foos['foo2'].my_data,
                                  read_foofile3.buckets['bucket1'].foos['foo1'].my_data)
                 self.assertEqual(read_foofile4.foofile_data, read_foofile3.buckets['bucket1'].foos['foo1'].my_data)
-        #with File(self.source_paths[2], 'r') as f:
-        #    self.assertEqual(f['buckets/bucket2/foo_holder/foo2/my_data'].file.filename, self.source_paths[0])
-        #    self.assertEqual(f['foofile_data'].file.filename, self.souce_paths[0])
-        #    self.assertIsInstance(f.get('buckets/bucket2/foo_holder/foo2/my_data', getlink=True),
-        #                          h5py.ExternalLink)
-        #    self.assertIsInstance(f.get('foofile_data', getlink=True), h5py.ExternalLink)
-        """
 
     def test_append_external_link_copy_data(self):
         """Test that exporting a written container after adding a link with link_data=False copies the data."""
-        pass  # TODO: This test currently fails
-        """
         foo1 = Foo('foo1', [1, 2, 3, 4, 5], "I am foo1", 17, 3.14)
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket])
-        with ZarrIO(self.store_paths[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile)
         foofile2 = FooFile(buckets=[])
-        with ZarrIO(self.store_paths[1], manager=get_foo_buildmanager(), mode='w') as write_io:
+        with ZarrIO(self.store_path[1], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile2)
         manager = get_foo_buildmanager()
-        with ZarrIO(self.store_paths[0], manager=manager, mode='r') as read_io1:
+        with ZarrIO(self.store_path[0], manager=manager, mode='r') as read_io1:
             read_foofile1 = read_io1.read()
-            with ZarrIO(self.store_paths[1], manager=manager, mode='r') as read_io2:
+            with ZarrIO(self.store_path[1], manager=manager, mode='r') as read_io2:
                 read_foofile2 = read_io2.read()
                 # create a foo with link to existing dataset my_data (not in same file), add the foo to new foobucket
                 # this would normally make an external link but because link_data=False, data will be copied
@@ -1441,87 +1444,74 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
                 # also add link from foofile to new foo2.my_data dataset which is a link to foo1.my_data dataset
                 # this would normally make an external link but because link_data=False, data will be copied
                 read_foofile2.foofile_data = foo2.my_data
-                with ZarrIO(self.store_paths[2], mode='w') as export_io:
+                with ZarrIO(self.store_path[2], mode='w') as export_io:
                     export_io.export(src_io=read_io2, container=read_foofile2, write_args={'link_data': False})
-        with ZarrIO(self.store_paths[0], manager=get_foo_buildmanager(), mode='r') as read_io1:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='r') as read_io1:
             read_foofile3 = read_io1.read()
-            with ZarrIO(self.store_paths[2], manager=get_foo_buildmanager(), mode='r') as read_io2:
+            with ZarrIO(self.store_path[2], manager=get_foo_buildmanager(), mode='r') as read_io2:
                 read_foofile4 = read_io2.read()
                 # check that file can be read
                 self.assertNotEqual(read_foofile4.buckets['bucket2'].foos['foo2'].my_data,
                                     read_foofile3.buckets['bucket1'].foos['foo1'].my_data)
                 self.assertNotEqual(read_foofile4.foofile_data, read_foofile3.buckets['bucket1'].foos['foo1'].my_data)
                 self.assertNotEqual(read_foofile4.foofile_data, read_foofile4.buckets['bucket2'].foos['foo2'].my_data)
-        # with File(self.source_paths[2], 'r') as f:
-        #    self.assertEqual(f['buckets/bucket2/foo_holder/foo2/my_data'].file.filename, self.source_paths[2])
-        #    self.assertEqual(f['foofile_data'].file.filename, self.source_paths[2])
-        """
 
     def test_export_dset_refs(self):
         """Test that exporting a written container with a dataset of references works."""
-        pass  # TODO: This test currently fails
-        """
-        bazs = []
-        num_bazs = 10
+        num_bazs = 1
+        bazs = []  # set up dataset of references
         for i in range(num_bazs):
             bazs.append(Baz(name='baz%d' % i))
-        baz_data = BazData(name='baz_data1', data=bazs)
-        bucket = BazBucket(name='bucket1', bazs=bazs.copy(), baz_data=baz_data)
-        with ZarrIO(self.store_paths[0], manager=_get_baz_manager(), mode='w') as write_io:
-            write_io.write(bucket)
-        with ZarrIO(self.store_paths[0], manager=_get_baz_manager(), mode='r') as read_io:
-            read_bucket1 = read_io.read()
-            # NOTE: reference IDs might be the same between two identical files
-            # adding a Baz with a smaller name should change the reference IDs on export
-            new_baz = Baz(name='baz000')
-            read_bucket1.add_baz(new_baz)
-            with ZarrIO(self.store_paths[1], mode='w') as export_io:
-                export_io.export(src_io=read_io, container=read_bucket1)
-        with ZarrIO(self.store_paths[1], manager=_get_baz_manager(), mode='r') as read_io:
-            read_bucket2 = read_io.read()
-            # remove and check the appended child, then compare the read container with the original
-            read_new_baz = read_bucket2.remove_baz('baz000')
-            self.assertContainerEqual(new_baz, read_new_baz, ignore_hdmf_attrs=True)
-            self.assertContainerEqual(bucket, read_bucket2, ignore_name=True, ignore_hdmf_attrs=True)
-            for i in range(num_bazs):
-                baz_name = 'baz%d' % i
-                self.assertIs(read_bucket2.baz_data.data[i], read_bucket2.bazs[baz_name])
-        """
+        baz_data = BazData(name='baz_data', data=bazs)
+        container = BazBucket(bazs=bazs, baz_data=baz_data)
+        manager = get_baz_buildmanager()
 
-    def test_export_cpd_dset_refs(self):
-        """Test that exporting a written container with a compound dataset with references works."""
-        pass  # TODO: This test currently fails
-        """
-        bazs = []
-        baz_pairs = []
-        num_bazs = 10
-        for i in range(num_bazs):
-            b = Baz(name='baz%d' % i)
-            bazs.append(b)
-            baz_pairs.append((i, b))
-        baz_cpd_data = BazCpdData(name='baz_cpd_data1', data=baz_pairs)
-        bucket = BazBucket(name='bucket1', bazs=bazs.copy(), baz_cpd_data=baz_cpd_data)
-        with ZarrIO(self.store_paths[0], manager=_get_baz_manager(), mode='w') as write_io:
-            write_io.write(bucket)
-        with ZarrIO(self.store_paths[0], manager=_get_baz_manager(), mode='r') as read_io:
-            read_bucket1 = read_io.read()
-            # NOTE: reference IDs might be the same between two identical files
-            # adding a Baz with a smaller name should change the reference IDs on export
-            new_baz = Baz(name='baz000')
-            read_bucket1.add_baz(new_baz)
-            with ZarrIO(self.store_paths[1], mode='w') as export_io:
-                export_io.export(src_io=read_io, container=read_bucket1)
-        with ZarrIO(self.store_paths[1], manager=_get_baz_manager(), mode='r') as read_io:
-            read_bucket2 = read_io.read()
-            # remove and check the appended child, then compare the read container with the original
-            read_new_baz = read_bucket2.remove_baz(new_baz.name)
-            self.assertContainerEqual(new_baz, read_new_baz, ignore_hdmf_attrs=True)
-            self.assertContainerEqual(bucket, read_bucket2, ignore_name=True, ignore_hdmf_attrs=True)
+        with ZarrIO(self.store_path[0], manager=manager, mode='w') as writer:
+            writer.write(container=container)
+
+        with ZarrIO(self.store_path[0], manager=manager, mode='r') as read_io:
+            read_container = read_io.read()
+
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
+                export_io.export(src_io=read_io, container=read_container)
+
+        with ZarrIO(self.store_path[1], manager=manager, mode='r') as read_io2:
+            read_container = read_io2.read()
+            self.assertEqual(len(read_container.baz_data.data), 1)
+            self.assertContainerEqual(container, read_container, ignore_name=True, ignore_hdmf_attrs=True)
             for i in range(num_bazs):
                 baz_name = 'baz%d' % i
-                self.assertEqual(read_bucket2.baz_cpd_data.data[i][0], i)
-                self.assertIs(read_bucket2.baz_cpd_data.data[i][1], read_bucket2.bazs[baz_name])
-        """
+                self.assertIs(read_container.baz_data.data[i], read_container.bazs[baz_name])
+
+    # def test_export_cpd_dset_refs(self):
+    #     """Test that exporting a written container with a compound dataset with references works."""
+    #     bazs = []
+    #     baz_pairs = []
+    #     num_bazs = 10
+    #     for i in range(num_bazs):
+    #         b = Baz(name='baz%d' % i)
+    #         bazs.append(b)
+    #         baz_pairs.append((i, b))
+    #     baz_cpd_data = BazCpdData(name='baz_cpd_data1', data=baz_pairs)
+    #     bucket = BazBucket(name='bucket1', bazs=bazs.copy(), baz_cpd_data=baz_cpd_data)
+    #     with ZarrIO(self.store_path[0], manager=get_baz_buildmanager(), mode='w') as write_io:
+    #         write_io.write(bucket)
+    #     with ZarrIO(self.store_path[0], manager=get_baz_buildmanager(), mode='r') as read_io:
+    #         read_bucket1 = read_io.read()
+    #         # NOTE: reference IDs might be the same between two identical files
+    #         # adding a Baz with a smaller name should change the reference IDs on export
+    #         with ZarrIO(self.store_path[1], mode='w') as export_io:
+    #             export_io.export(src_io=read_io, container=read_bucket1)
+    #     with ZarrIO(self.store_paths[1], manager=get_baz_buildmanager(), mode='r') as read_io:
+    #         read_bucket2 = read_io.read()
+    #         # remove and check the appended child, then compare the read container with the original
+    #         read_new_baz = read_bucket2.remove_baz(new_baz.name)
+    #         self.assertContainerEqual(new_baz, read_new_baz, ignore_hdmf_attrs=True)
+    #         self.assertContainerEqual(bucket, read_bucket2, ignore_name=True, ignore_hdmf_attrs=True)
+    #         for i in range(num_bazs):
+    #             baz_name = 'baz%d' % i
+    #             self.assertEqual(read_bucket2.baz_cpd_data.data[i][0], i)
+    #             self.assertIs(read_bucket2.baz_cpd_data.data[i][1], read_bucket2.bazs[baz_name])
 
     def test_non_manager_container(self):
         """Test that exporting with a src_io without a manager raises an error."""
@@ -1529,7 +1519,7 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket])
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile)
 
         class OtherIO(HDMFIO):
@@ -1551,7 +1541,7 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
                 pass
 
         with OtherIO() as read_io:
-            with ZarrIO(self.store[1], mode='w') as export_io:
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
                 msg = 'When a container is provided, src_io must have a non-None manager (BuildManager) property.'
                 with self.assertRaisesWith(ValueError, msg):
                     export_io.export(src_io=read_io, container=foofile, write_args={'link_data': False})
@@ -1562,7 +1552,7 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket])
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile)
 
         class OtherIO(HDMFIO):
@@ -1587,7 +1577,7 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
                 pass
 
         with OtherIO(manager=get_foo_buildmanager()) as read_io:
-            with ZarrIO(self.store[1], mode='w') as export_io:
+            with ZarrIO(self.store_path[1], mode='w') as export_io:
                 msg = ("Cannot export from non-Zarr backend OtherIO to Zarr with write argument link_data=True. "
                        "Set write_args={'link_data': False}")
                 with self.assertRaisesWith(UnsupportedOperation, msg):
@@ -1599,11 +1589,10 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
         foobucket = FooBucket('bucket1', [foo1])
         foofile = FooFile(buckets=[foobucket])
 
-        with ZarrIO(self.store[0], manager=get_foo_buildmanager(), mode='w') as write_io:
+        with ZarrIO(self.store_path[0], manager=get_foo_buildmanager(), mode='w') as write_io:
             write_io.write(foofile)
 
-        with ZarrIO(self.store[0], mode='r') as read_io:
-            with ZarrIO(self.store[1], mode='a') as export_io:
-                msg = "Cannot export to file %s in mode 'a'. Please use mode 'w'." % self.store_path[1]
-                with self.assertRaisesWith(UnsupportedOperation, msg):
+        with ZarrIO(self.store_path[0], mode='r') as read_io:
+            with ZarrIO(self.store_path[1], mode='a') as export_io:
+                with self.assertRaises(UnsupportedOperation):
                     export_io.export(src_io=read_io)

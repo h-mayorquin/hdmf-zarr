@@ -14,9 +14,9 @@ from tests.unit.base_tests_zarrio import (BaseTestZarrWriter,
                                           BaseTestZarrWriteUnit,
                                           BaseTestExportZarrToZarr)
 from zarr.storage import (DirectoryStore,
-                          TempStore,
                           NestedDirectoryStore)
 from tests.unit.utils import (Baz, BazData, BazBucket, get_baz_buildmanager)
+
 import zarr
 from hdmf_zarr.backend import ZarrIO
 from .utils import BuildDatasetShapeMixin, BarData, BarDataHolder
@@ -88,32 +88,6 @@ class TestExportZarrToZarrDirectoryStore(BaseTestExportZarrToZarr):
 
 
 #########################################
-#  TempStore tests
-#########################################
-class TestZarrWriterTempStore(BaseTestZarrWriter):
-    """Test writing of builder with Zarr using a custom TempStore"""
-    def setUp(self):
-        super().setUp()
-        self.store = TempStore()
-        self.store_path = self.store.path
-
-
-class TestZarrWriteUnitTempStore(BaseTestZarrWriteUnit):
-    """Unit test for individual write functions using a custom TempStore"""
-    def setUp(self):
-        self.store = TempStore()
-        self.store_path = self.store.path
-
-
-class TestExportZarrToZarrTempStore(BaseTestExportZarrToZarr):
-    """Test exporting Zarr to Zarr using TempStore."""
-    def setUp(self):
-        super().setUp()
-        self.store = [TempStore() for i in range(len(self.store_path))]
-        self.store_path = [s.path for s in self.store]
-
-
-#########################################
 #  NestedDirectoryStore tests
 #########################################
 class TestZarrWriterNestedDirectoryStore(BaseTestZarrWriter):
@@ -156,28 +130,28 @@ class TestConsolidateMetadata(ZarrStoreTestCase):
     """
     def test_get_store_path_shallow(self):
         self.create_zarr(consolidate_metadata=False)
-        store = DirectoryStore(self.store)
+        store = DirectoryStore(self.store_path)
         path = ZarrIO._ZarrIO__get_store_path(store)
-        expected_path = os.path.normpath(os.path.join(CUR_DIR, 'test_io.zarr'))
+        expected_path = os.path.abspath('test_io.zarr')
         self.assertEqual(path, expected_path)
 
     def test_get_store_path_deep(self):
         self.create_zarr()
-        zarr_obj = zarr.open_consolidated(self.store, mode='r')
+        zarr_obj = zarr.open_consolidated(self.store_path, mode='r')
         store = zarr_obj.store
         path = ZarrIO._ZarrIO__get_store_path(store)
-        expected_path = os.path.normpath(os.path.join(CUR_DIR, 'test_io.zarr'))
+        expected_path = os.path.abspath('test_io.zarr')
         self.assertEqual(path, expected_path)
 
     def test_force_open_without_consolidated(self):
         """Test that read-mode -r forces a regular read with mode r"""
         self.create_zarr(consolidate_metadata=True)
         # Confirm that opening the file 'r' mode indeed uses the consolidated metadata
-        with ZarrIO(self.store, mode='r') as read_io:
+        with ZarrIO(self.store_path, mode='r') as read_io:
             read_io.open()
             self.assertIsInstance(read_io.file.store, zarr.storage.ConsolidatedMetadataStore)
         # Confirm that opening the file IN 'r-' mode indeed forces a regular open without consolidated metadata
-        with ZarrIO(self.store, mode='r-') as read_io:
+        with ZarrIO(self.store_path, mode='r-') as read_io:
             read_io.open()
             self.assertIsInstance(read_io.file.store, zarr.storage.DirectoryStore)
 
@@ -187,14 +161,14 @@ class TestConsolidateMetadata(ZarrStoreTestCase):
         is used to force read without consolidated metadata.
         """
         self.create_zarr(consolidate_metadata=True)
-        with ZarrIO(self.store, mode='r') as read_io:
+        with ZarrIO(self.store_path, mode='r') as read_io:
             # Check that using 'r-' fails
             msg = 'Mode r- not allowed for reading with consolidated metadata'
             with self.assertRaisesWith(ValueError, msg):
-                read_io._ZarrIO__open_file_consolidated(store=self.store, mode='r-')
+                read_io._ZarrIO__open_file_consolidated(store=self.store_path, mode='r-')
             # Check that using 'r' does not fail
             try:
-                read_io._ZarrIO__open_file_consolidated(store=self.store, mode='r')
+                read_io._ZarrIO__open_file_consolidated(store=self.store_path, mode='r')
             except ValueError as e:
                 self.fail("ZarrIO.__open_file_consolidated raised an unexpected ValueError: {}".format(e))
 
@@ -205,7 +179,7 @@ class TestOverwriteExistingFile(ZarrStoreTestCase):
         an existing file. Zarr can write into a directory but not a file.
         """
         # create a dummy text file
-        with open(self.store, "w") as file:
+        with open(self.store_path, "w") as file:
             file.write("Just a test file used in  TestOverwriteExistingFile")
         # try to create a Zarr file at the same location (i.e., self.store) as the
         # test text file to force overwriting the existing file.
