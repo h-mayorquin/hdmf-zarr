@@ -345,7 +345,7 @@ class BaseTestZarrWriter(BaseZarrWriterTestCase):
                 baz_name = "baz%d" % i
                 expected_container = read_container.bazs[baz_name]
                 expected_value = {
-                    "source": "test_io.zarr",
+                    "source": ".",
                     "path": "/bazs/" + baz_name,
                     "object_id": expected_container.object_id,
                     "source_object_id": read_container.object_id,
@@ -664,7 +664,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
             "attr1": {
                 "zarr_dtype": "object",
                 "value": {
-                    "source": "test_io.zarr",
+                    "source": ".",
                     "path": "/dataset_1",
                     "object_id": None,
                     "source_object_id": None,
@@ -689,7 +689,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
             "attr1": {
                 "zarr_dtype": "object",
                 "value": {
-                    "source": "test_io.zarr",
+                    "source": ".",
                     "path": "/dataset_1",
                     "source_object_id": None,
                     "object_id": None,
@@ -917,7 +917,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         expected_link = {
             "name": "test_softlink",
             "path": "/test_dataset",
-            "source": os.path.abspath(self.store_path),
+            "source": ".",
         }
         self.assertEqual(len(tempf.attrs["zarr_link"]), 1)
         self.assertDictEqual(tempf.attrs["zarr_link"][0], expected_link)
@@ -958,7 +958,7 @@ class BaseTestZarrWriteUnit(BaseZarrWriterTestCase):
         expected_link = {
             "name": "test_softlink",
             "path": "/test_dataset",
-            "source": os.path.abspath(self.store_path),
+            "source": ".",
         }
         self.assertEqual(len(tempf.attrs["zarr_link"]), 1)
         self.assertDictEqual(tempf.attrs["zarr_link"][0], expected_link)
@@ -1029,11 +1029,11 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
                 export_io.export(src_io=read_io)
 
         self.assertTrue(os.path.exists(self.store_path[1]))
-        self.assertEqual(os.path.relpath(foofile.container_source), self.store_path[0])
+        self.assertEqual(foofile.container_source, os.path.abspath(self.store_path[0]))
 
         with ZarrIO(self.store_path[1], manager=get_foo_buildmanager(), mode="r") as read_io:
             read_foofile = read_io.read()
-            self.assertEqual(os.path.relpath(read_foofile.container_source), self.store_path[1])
+            self.assertEqual(read_foofile.container_source, os.path.abspath(self.store_path[1]))
             self.assertContainerEqual(foofile, read_foofile, ignore_hdmf_attrs=True)
 
     def test_basic_container(self):
@@ -1051,11 +1051,11 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
                 export_io.export(src_io=read_io, container=read_foofile)
 
         self.assertTrue(os.path.exists(self.store_path[1]))
-        self.assertEqual(os.path.relpath(foofile.container_source), self.store_path[0])
+        self.assertEqual(foofile.container_source, os.path.abspath(self.store_path[0]))
 
         with ZarrIO(self.store_path[1], manager=get_foo_buildmanager(), mode="r") as read_io:
             read_foofile = read_io.read()
-            self.assertEqual(os.path.relpath(read_foofile.container_source), self.store_path[1])
+            self.assertEqual(read_foofile.container_source, os.path.abspath(self.store_path[1]))
             self.assertContainerEqual(foofile, read_foofile, ignore_hdmf_attrs=True)
 
     def test_container_part(self):
@@ -1145,7 +1145,7 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
         with ZarrIO(self.store_path[1], manager=get_foo_buildmanager(), mode="r") as read_io:
             read_foofile2 = read_io.read()
             if isinstance(self.store_path[1], str):
-                self.assertEqual(os.path.relpath(read_foofile2.foo_link.container_source), self.store_path[1])
+                self.assertEqual(read_foofile2.foo_link.container_source, os.path.abspath(self.store_path[1]))
             else:
                 self.assertEqual(read_foofile2.foo_link.container_source, self.store_path[1].path)
 
@@ -1175,7 +1175,7 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
             read_foofile2 = read_io.read()
             # make sure the linked group is read from the first file
             if isinstance(self.store_path[0], str):
-                self.assertEqual(os.path.relpath(read_foofile2.foo_link.container_source), self.store_path[0])
+                self.assertEqual(read_foofile2.foo_link.container_source, os.path.abspath(self.store_path[0]))
             else:
                 self.assertEqual(read_foofile2.foo_link.container_source, self.store_path[0].path)
 
@@ -1232,7 +1232,7 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
         with ZarrIO(self.store_path[2], manager=get_foo_buildmanager(), mode="r") as read_io:
             read_foofile2 = read_io.read()
             # make sure the linked dataset is read from the first file
-            self.assertEqual(os.path.relpath(read_foofile2.foofile_data.store.store.path), self.store_path[0])
+            self.assertEqual(read_foofile2.foofile_data.store.store.path, os.path.abspath(self.store_path[0]))
 
     def test_external_link_link(self):
         """Test that exporting a written file with external links to external links maintains the links."""
@@ -1281,23 +1281,19 @@ class BaseTestExportZarrToZarr(BaseZarrWriterTestCase):
                 export_io.export(src_io=read_io)
         with ZarrIO(self.store_path[1], manager=get_foo_buildmanager(), mode="r") as read_io:
             read_foofile2 = read_io.read()
-            expected = ZarrIO.get_zarr_paths(read_foofile2.foo_ref_attr.my_data)
-            if isinstance(self.store_path[1], str):
-                self.assertTupleEqual(
-                    (os.path.normpath(expected[0]), os.path.normpath(expected[1])),
-                    (
-                        os.path.normpath(os.path.abspath(self.store_path[1])),
-                        os.path.normpath("/buckets/bucket1/foo_holder/foo1/my_data"),
-                    ),
-                )
-            else:
-                self.assertTupleEqual(
-                    (os.path.normpath(expected[0]), os.path.normpath(expected[1])),
-                    (
-                        os.path.normpath(os.path.abspath(self.store_path[1].path)),
-                        os.path.normpath("/buckets/bucket1/foo_holder/foo1/my_data"),
-                    ),
-                )
+
+            # check the raw zarr attribute reference
+            expected_attr_reference = {
+                "value": {
+                    "object_id": foo1.object_id,
+                    "path": "/buckets/bucket1/foo_holder/foo1",
+                    "source": ".",
+                    "source_object_id": foofile.object_id,
+                },
+                "zarr_dtype": "object",
+            }
+            self.assertEqual(read_io.file.attrs["foo_ref_attr"], expected_attr_reference)
+
             # make sure the attribute reference resolves to the container within the same file
             self.assertIs(read_foofile2.foo_ref_attr, read_foofile2.buckets["bucket1"].foos["foo1"])
 

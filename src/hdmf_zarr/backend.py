@@ -685,7 +685,7 @@ class ZarrIO(HDMFIO):
                         raise TypeError(str(e) + " type=" + str(type(value)) + "  data=" + str(value)) from e
             # Case 2: References
             elif isinstance(value, (Builder, ReferenceBuilder)):
-                refs = self._create_ref(value, self.path)
+                refs = self._create_ref(value, ref_link_source=self.path)
                 tmp = {"zarr_dtype": "object", "value": refs}
                 obj.attrs[key] = tmp
             # Case 3: Scalar attributes
@@ -727,54 +727,15 @@ class ZarrIO(HDMFIO):
         return path
 
     @staticmethod
-    def get_zarr_paths(zarr_object):
-        """
-        For a Zarr object find 1) the path to the main zarr file it is in and 2) the path to the object within the file
-        :param zarr_object: Object for which we are looking up the path
-        :type zarr_object: Zarr Group or Array
-        :return: Tuple of two string with: 1) path of the Zarr file and 2) full path within the zarr file to the object
-        """
-        # In Zarr the path is a combination of the path of the store and the path of the object. So we first need to
-        # merge those two paths, then remove the path of the file, add the missing leading "/" and then compute the
-        # directory name to get the path of the parent
-        fpath = ZarrIO._ZarrIO__get_store_path(zarr_object.store)
-        fullpath = os.path.normpath(os.path.join(fpath, zarr_object.path)).replace("\\", "/")
-        # To determine the filepath we now iterate over the path and check if the .zgroup object exists at
-        # a level, indicating that we are still within the Zarr file. The first level we hit where the parent
-        # directory does not have a .zgroup means we have found the main file
-        filepath = fullpath
-        while os.path.exists(os.path.join(os.path.dirname(filepath), ".zgroup")):
-            filepath = os.path.dirname(filepath)
-        # From the fullpath and filepath we can now compute the objectpath within the zarr file as the relative
-        # path from the filepath to the object
-        objectpath = "/" + os.path.relpath(fullpath, filepath)
-        # return the result
-        return filepath, objectpath
-
-    @staticmethod
     def get_zarr_parent_path(zarr_object):
         """
-        Get the location of the parent of a zarr_object within the file
+        Get the absolute Unix path to the parent of a zarr_object from the root of the Zarr file
         :param zarr_object: Object for which we are looking up the path
         :type zarr_object: Zarr Group or Array
         :return: String with the path
         """
-        filepath, objectpath = ZarrIO.get_zarr_paths(zarr_object)
-        parentpath = os.path.dirname(objectpath)
-        return parentpath
-
-    @staticmethod
-    def is_zarr_file(path):
-        """
-        Check if the given path defines a Zarr file
-        :param path: Full path to main directory
-        :return: Bool
-        """
-        if os.path.exists(path):
-            if os.path.isdir(path):
-                if os.path.exists(os.path.join(path, ".zgroup")):
-                    return True
-        return False
+        parent_path = "/" + os.path.dirname(zarr_object.path).replace("\\", "/")
+        return parent_path
 
     def __is_ref(self, dtype):
         if isinstance(dtype, DtypeSpec):
@@ -801,12 +762,13 @@ class ZarrIO(HDMFIO):
             source_file = str(zarr_ref["path"])
         else:
             source_file = str(zarr_ref["source"])
-        # Resolve the path relative to the current file
+
         if not self.is_remote():
             if isinstance(self.source, str) and self.source.startswith(("s3://")):
                 source_file = self.source
             else:
-                source_file = os.path.abspath(source_file)
+                # Join with source_file to resolve the relative path
+                source_file = os.path.normpath(os.path.join(self.source, source_file))
         else:
             # get rid of extra "/" and "./" in the path root and source_file
             root_path = str(self.path).rstrip("/")
@@ -895,7 +857,7 @@ class ZarrIO(HDMFIO):
             str_path = self.path.path
         else:
             str_path = self.path
-        rel_source = os.path.relpath(os.path.abspath(ref_link_source), os.path.dirname(os.path.abspath(str_path)))
+        rel_source = os.path.relpath(os.path.abspath(ref_link_source), os.path.abspath(str_path))
 
         # Return the ZarrReference object
         ref = ZarrReference(
@@ -965,7 +927,7 @@ class ZarrIO(HDMFIO):
 
         name = builder.name
         # Get the reference
-        zarr_ref = self._create_ref(builder, ref_link_source)
+        zarr_ref = self._create_ref(builder, ref_link_source=ref_link_source)
 
         self.__add_link__(parent, zarr_ref.source, zarr_ref.path, name)
         self._written_builders.set_written(builder)  # record that the builder has been written
@@ -1078,9 +1040,13 @@ class ZarrIO(HDMFIO):
         if isinstance(data, Array):
             # copy the dataset
             data_filename = self.__get_store_path(data.store)
+            str_path = self.path
+            if not isinstance(str_path, str):  # a store
+                str_path = self.path.path
+            rel_data_filename = os.path.relpath(os.path.abspath(data_filename), os.path.abspath(str_path))
             if link_data:
                 if export_source is None:  # not exporting
-                    self.__add_link__(parent, data_filename, data.name, name)
+                    self.__add_link__(parent, rel_data_filename, data.name, name)
                     linked = True
                     dset = None
                 else:  # exporting
@@ -1089,7 +1055,7 @@ class ZarrIO(HDMFIO):
                     # I have three files, FileA, FileB, FileC. I want to export FileA to FileB. FileA has an
                     # EXTERNAL link to a dataset in Filec. This case preserves the link to FileC to also be in FileB.
                     if data_filename != export_source:
-                        self.__add_link__(parent, data_filename, data.name, name)
+                        self.__add_link__(parent, rel_data_filename, data.name, name)
                         linked = True
                         dset = None
                     # Case 2: If the dataset is in the export source and has a DIFFERENT path as the builder,
@@ -1098,7 +1064,7 @@ class ZarrIO(HDMFIO):
                     # INTERNAL link. This case preserves the link to also be in FileB.
                     ###############
                     elif parent.name != data_parent:
-                        self.__add_link__(parent, self.path, data.name, name)
+                        self.__add_link__(parent, ".", data.name, name)
                         linked = True
                         dset = None
 
